@@ -1,7 +1,6 @@
 flask
+flask-cors
 pandas
-feedparser
 sentence-transformers
 scikit-learn
-numpy
-flask-cors
+torch --index-url https://download.pytorch.org/whl/cpu
