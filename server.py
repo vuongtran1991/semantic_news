@@ -1,32 +1,17 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import pandas as pd
-import os
+import re
 
-# =========================
-# FLASK
-# =========================
 app = Flask(__name__)
 CORS(app)
 
-# =========================
-# LOAD DATABASE
-# =========================
 print("Loading database...")
-
 df = pd.read_csv("news.csv")
 
-# chống lỗi dữ liệu rỗng
-df["title"] = df["title"].fillna("")
-df["summary"] = df["summary"].fillna("")
-df["link"] = df["link"].fillna("")
-df["source"] = df["source"].fillna("")
-
-# =========================
-# AI CHƯA LOAD NGAY
-# =========================
 model = None
 news_vectors = None
+
 
 # =========================
 # LOAD AI KHI CẦN
@@ -36,31 +21,58 @@ def load_ai():
 
     if model is None:
 
-        print("Loading AI model (first request only)...")
+        print("Loading AI model...")
 
         from sentence_transformers import SentenceTransformer
 
-        # model nhẹ cho Render free
         model = SentenceTransformer(
-            'paraphrase-multilingual-MiniLM-L12-v2',
-            device='cpu'
+            'paraphrase-multilingual-MiniLM-L12-v2'
         )
 
-        print("Creating vectors...")
-
-        # AI tìm theo title + summary
-        combined_texts = (
-            df["title"] + " " + df["summary"]
+        # GHÉP TITLE + SUMMARY
+        texts = (
+            df["title"].fillna('') + " " +
+            df["summary"].fillna('')
         ).tolist()
 
-        # tạo vector
-        news_vectors = model.encode(
-            combined_texts,
-            batch_size=8,
-            show_progress_bar=False
-        )
+        news_vectors = model.encode(texts)
 
         print("AI ready!")
+
+
+# =========================
+# TỪ GIẬT GÂN
+# =========================
+CLICKBAIT_WORDS = [
+    "sốc",
+    "kinh hoàng",
+    "gây bão",
+    "không thể tin",
+    "chấn động",
+    "ngã ngửa"
+]
+
+
+def detect_clickbait(text):
+
+    lower = text.lower()
+
+    for word in CLICKBAIT_WORDS:
+        if word in lower:
+            return word
+
+    return None
+
+
+# =========================
+# TÁCH SỐ / % / NGÀY
+# =========================
+def extract_numbers(text):
+
+    pattern = r'\d{1,2}/\d{1,2}/\d{2,4}|\d+%?'
+
+    return re.findall(pattern, text)
+
 
 # =========================
 # HOME
@@ -69,70 +81,114 @@ def load_ai():
 def home():
     return "Semantic News API is running!"
 
+
 # =========================
-# SEARCH API
+# SEARCH
 # =========================
 @app.route("/search", methods=["POST"])
 def search():
 
+    data = request.json
+    query = data["query"]
+
+    # =====================
+    # B1: CHẶN GIẬT GÂN
+    # =====================
+    clickbait = detect_clickbait(query)
+
+    if clickbait:
+
+        return jsonify({
+            "status": "fake",
+            "message": f"❌ Phát hiện từ giật gân: '{clickbait}'",
+            "results": []
+        })
+
+    # =====================
+    # B2: LOAD AI
+    # =====================
     load_ai()
 
     from sklearn.metrics.pairwise import cosine_similarity
 
-    try:
+    query_vector = model.encode([query])
 
-        data = request.json
+    scores = cosine_similarity(
+        query_vector,
+        news_vectors
+    )[0]
 
-        # kiểm tra query
-        if not data or "query" not in data:
-            return jsonify({
-                "error": "Missing query"
-            }), 400
+    top_indices = scores.argsort()[-5:][::-1]
 
-        query = data["query"]
+    results = []
 
-        # vector câu hỏi user
-        query_vector = model.encode([query])
+    query_numbers = extract_numbers(query)
 
-        # tính độ giống
-        scores = cosine_similarity(
-            query_vector,
-            news_vectors
-        )[0]
+    # =====================
+    # B3: XỬ LÝ KẾT QUẢ
+    # =====================
+    for idx in top_indices:
 
-        # lấy top 5 bài gần nhất
-        top_indices = scores.argsort()[-5:][::-1]
+        title = str(df.iloc[idx]["title"])
+        summary = str(df.iloc[idx]["summary"])
+        link = str(df.iloc[idx]["link"])
+        source = str(df.iloc[idx]["source"])
 
-        results = []
+        score = float(scores[idx])
 
-        for idx in top_indices:
+        article_text = title + " " + summary
 
-            results.append({
-                "title": df.iloc[idx]["title"],
-                "summary": df.iloc[idx]["summary"],
-                "link": df.iloc[idx]["link"],
-                "source": df.iloc[idx]["source"],
-                "score": float(scores[idx])
-            })
+        article_numbers = extract_numbers(article_text)
+
+        mismatches = []
+
+        # kiểm tra số liệu
+        for q in query_numbers:
+
+            if q not in article_numbers:
+
+                correct_value = (
+                    article_numbers[0]
+                    if len(article_numbers) > 0
+                    else "Không có"
+                )
+
+                mismatches.append({
+                    "user": q,
+                    "official": correct_value
+                })
+
+        results.append({
+            "title": title,
+            "summary": summary,
+            "link": link,
+            "source": source,
+            "score": round(score, 2),
+            "mismatches": mismatches
+        })
+
+    # =====================
+    # B4: KHÔNG TÌM THẤY
+    # =====================
+    if results[0]["score"] < 0.35:
 
         return jsonify({
+            "status": "not_found",
+            "message": "⚠ Không tìm thấy bài báo khớp hoàn toàn. Dưới đây là các bài gần đúng.",
             "results": results
         })
 
-    except Exception as e:
+    # =====================
+    # B5: THÀNH CÔNG
+    # =====================
+    return jsonify({
+        "status": "success",
+        "message": "✅ Đã tìm thấy bài báo phù hợp",
+        "results": results
+    })
 
-        return jsonify({
-            "error": str(e)
-        }), 500
 
 # =========================
-# RUN SERVER
+# RUN
 # =========================
-if __name__ == "__main__":
-
-    port = int(os.environ.get("PORT", 5000))
-
-    app.run(
-        host="0.0.0.0",
-        port=port
-    )
+app.run(host="0.0.0.0", port=5000)
