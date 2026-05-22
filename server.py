@@ -1,50 +1,73 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+
 import pandas as pd
+import feedparser
 import re
+import threading
+import time
 
 app = Flask(__name__)
 CORS(app)
 
-print("Loading database...")
-
-df = pd.read_csv("news.csv")
+# =========================
+# MODEL NHẸ
+# =========================
 
 model = None
 news_vectors = None
-
-
-# =========================
-# LOAD AI
-# =========================
-def load_ai():
-
-    global model, news_vectors
-
-    if model is None:
-
-        print("Loading AI model...")
-
-        from sentence_transformers import SentenceTransformer
-
-        model = SentenceTransformer(
-            'paraphrase-multilingual-MiniLM-L12-v2'
-        )
-
-        # TITLE + SUMMARY
-        texts = (
-            df["title"].fillna('') + " " +
-            df["summary"].fillna('')
-        ).tolist()
-
-        news_vectors = model.encode(texts)
-
-        print("AI ready!")
-
+df = pd.DataFrame()
 
 # =========================
-# CLICKBAIT
+# RSS NGUỒN CHÍNH THỐNG
 # =========================
+
+rss_urls = {
+
+    "VnExpress":
+    "https://vnexpress.net/rss/tin-moi-nhat.rss",
+
+    "TuoiTre":
+    "https://tuoitre.vn/rss/tin-moi-nhat.rss",
+
+    "ThanhNien":
+    "https://thanhnien.vn/rss/home.rss",
+
+    "DanTri":
+    "https://dantri.com.vn/rss/home.rss",
+
+    "Vietnamnet":
+    "https://vietnamnet.vn/rss/home.rss",
+
+    "TienPhong":
+    "https://tienphong.vn/rss/home.rss",
+
+    "LaoDong":
+    "https://laodong.vn/rss/home.rss",
+
+    "NguoiLaoDong":
+    "https://nld.com.vn/rss/home.rss",
+
+    "BaoChinhPhu":
+    "https://baochinhphu.vn/rss/home.rss",
+
+    "BaoNhanDan":
+    "https://nhandan.vn/rss/home.rss",
+
+    "BoYTe":
+    "https://moh.gov.vn/rss/-/asset_publisher/7ng11fEWgASC/rss",
+
+    "BoGiaoDuc":
+    "https://moet.gov.vn/rss/Pages/index.aspx",
+
+    "QuocHoi":
+    "https://quochoi.vn/rss/default.aspx"
+}
+
+# =========================
+# GIẬT GÂN
+# =========================
+
 CLICKBAIT_WORDS = [
     "sốc",
     "kinh hoàng",
@@ -54,6 +77,104 @@ CLICKBAIT_WORDS = [
     "ngã ngửa"
 ]
 
+# =========================
+# LOAD AI
+# =========================
+
+def load_ai():
+
+    global model
+
+    if model is None:
+
+        print("Loading AI model...")
+
+        from sentence_transformers import SentenceTransformer
+
+        model = SentenceTransformer(
+            'all-MiniLM-L6-v2'
+        )
+
+        print("AI ready!")
+
+# =========================
+# CRAWL RSS
+# =========================
+
+def crawl_news():
+
+    global df
+    global news_vectors
+
+    print("Updating RSS news...")
+
+    all_articles = []
+
+    for source, url in rss_urls.items():
+
+        try:
+
+            feed = feedparser.parse(url)
+
+            for entry in feed.entries[:10]:
+
+                all_articles.append({
+
+                    "source": source,
+
+                    "title":
+                    getattr(entry, 'title', ''),
+
+                    "summary":
+                    getattr(entry, 'summary', ''),
+
+                    "link":
+                    getattr(entry, 'link', '')
+                })
+
+        except:
+            pass
+
+    df = pd.DataFrame(all_articles)
+
+    print("Loaded", len(df), "articles")
+
+    # UPDATE VECTOR
+
+    if model is not None and not df.empty:
+
+        texts = (
+            df["title"].fillna('') + " " +
+            df["summary"].fillna('')
+        ).tolist()
+
+        news_vectors = model.encode(texts)
+
+# =========================
+# AUTO REFRESH RSS
+# =========================
+
+def auto_update():
+
+    while True:
+
+        crawl_news()
+
+        time.sleep(1800)
+
+# =========================
+# TÁCH SỐ
+# =========================
+
+def extract_numbers(text):
+
+    pattern = r'\d{1,2}/\d{1,2}/\d{2,4}|\d+%?'
+
+    return re.findall(pattern, text)
+
+# =========================
+# CHECK GIẬT GÂN
+# =========================
 
 def detect_clickbait(text):
 
@@ -66,37 +187,30 @@ def detect_clickbait(text):
 
     return None
 
-
-# =========================
-# EXTRACT NUMBER
-# =========================
-def extract_numbers(text):
-
-    pattern = r'\d{1,2}/\d{1,2}/\d{2,4}|\d+%?'
-
-    return re.findall(pattern, text)
-
-
 # =========================
 # HOME
 # =========================
+
 @app.route("/")
 def home():
-    return "Semantic News API is running!"
 
+    return "Semantic News API is running!"
 
 # =========================
 # SEARCH
 # =========================
+
 @app.route("/search", methods=["POST"])
 def search():
+
+    global news_vectors
 
     data = request.json
 
     query = data["query"]
 
     # =====================
-    # B1 CLICKBAIT
+    # CHECK GIẬT GÂN
     # =====================
 
     clickbait = detect_clickbait(query)
@@ -104,19 +218,27 @@ def search():
     if clickbait:
 
         return jsonify({
+
             "status": "fake",
+
             "message":
-                f"❌ Phát hiện từ giật gân: '{clickbait}'",
+            f"❌ Phát hiện từ giật gân: {clickbait}",
+
             "results": []
         })
 
     # =====================
-    # B2 LOAD AI
+    # LOAD AI
     # =====================
 
     load_ai()
 
     from sklearn.metrics.pairwise import cosine_similarity
+
+    # nếu chưa có vector
+    if news_vectors is None:
+
+        crawl_news()
 
     query_vector = model.encode([query])
 
@@ -131,22 +253,23 @@ def search():
 
     query_numbers = extract_numbers(query)
 
-    # =====================
-    # B3 BUILD RESULT
-    # =====================
-
     for idx in top_indices:
 
         title = str(df.iloc[idx]["title"])
+
         summary = str(df.iloc[idx]["summary"])
+
         link = str(df.iloc[idx]["link"])
+
         source = str(df.iloc[idx]["source"])
 
         score = float(scores[idx])
 
         article_text = title + " " + summary
 
-        article_numbers = extract_numbers(article_text)
+        article_numbers = extract_numbers(
+            article_text
+        )
 
         mismatches = []
 
@@ -156,11 +279,12 @@ def search():
 
                 correct_value = (
                     article_numbers[0]
-                    if len(article_numbers) > 0
+                    if article_numbers
                     else "Không có"
                 )
 
                 mismatches.append({
+
                     "user": q,
                     "official": correct_value
                 })
@@ -173,28 +297,26 @@ def search():
             "source": source,
             "score": round(score, 2),
             "mismatches": mismatches
-
         })
 
     # =====================
-    # B4 NOT FOUND
+    # KHÔNG KHỚP
     # =====================
 
-    if results[0]["score"] < 0.25:
+    if results[0]["score"] < 0.30:
 
         return jsonify({
 
             "status": "not_found",
 
             "message":
-                "⚠ Không tìm thấy bài báo khớp hoàn toàn. "
-                "Dưới đây là các bài gần đúng.",
+            "⚠ Không tìm thấy bài khớp hoàn toàn. Dưới đây là các bài gần đúng.",
 
             "results": results
         })
 
     # =====================
-    # B5 SUCCESS
+    # SUCCESS
     # =====================
 
     return jsonify({
@@ -202,15 +324,22 @@ def search():
         "status": "success",
 
         "message":
-            "✅ Đã tìm thấy bài báo phù hợp",
+        "✅ Đã tìm thấy bài báo phù hợp",
 
         "results": results
     })
 
+# =========================
+# START
+# =========================
 
-# =========================
-# RUN
-# =========================
+crawl_news()
+
+threading.Thread(
+    target=auto_update,
+    daemon=True
+).start()
+
 app.run(
     host="0.0.0.0",
     port=5000
