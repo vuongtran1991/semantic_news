@@ -7,6 +7,7 @@ app = Flask(__name__)
 CORS(app)
 
 print("Loading database...")
+
 df = pd.read_csv("news.csv")
 
 model = None
@@ -14,9 +15,10 @@ news_vectors = None
 
 
 # =========================
-# LOAD AI KHI CẦN
+# LOAD AI
 # =========================
 def load_ai():
+
     global model, news_vectors
 
     if model is None:
@@ -29,7 +31,7 @@ def load_ai():
             'paraphrase-multilingual-MiniLM-L12-v2'
         )
 
-        # GHÉP TITLE + SUMMARY
+        # TITLE + SUMMARY
         texts = (
             df["title"].fillna('') + " " +
             df["summary"].fillna('')
@@ -41,7 +43,7 @@ def load_ai():
 
 
 # =========================
-# TỪ GIẬT GÂN
+# CLICKBAIT
 # =========================
 CLICKBAIT_WORDS = [
     "sốc",
@@ -58,6 +60,7 @@ def detect_clickbait(text):
     lower = text.lower()
 
     for word in CLICKBAIT_WORDS:
+
         if word in lower:
             return word
 
@@ -65,7 +68,7 @@ def detect_clickbait(text):
 
 
 # =========================
-# TÁCH SỐ / % / NGÀY
+# EXTRACT NUMBER
 # =========================
 def extract_numbers(text):
 
@@ -89,24 +92,28 @@ def home():
 def search():
 
     data = request.json
+
     query = data["query"]
 
     # =====================
-    # B1: CHẶN GIẬT GÂN
+    # B1 CLICKBAIT
     # =====================
+
     clickbait = detect_clickbait(query)
 
     if clickbait:
 
         return jsonify({
             "status": "fake",
-            "message": f"❌ Phát hiện từ giật gân: '{clickbait}'",
+            "message":
+                f"❌ Phát hiện từ giật gân: '{clickbait}'",
             "results": []
         })
 
     # =====================
-    # B2: LOAD AI
+    # B2 LOAD AI
     # =====================
+
     load_ai()
 
     from sklearn.metrics.pairwise import cosine_similarity
@@ -125,8 +132,9 @@ def search():
     query_numbers = extract_numbers(query)
 
     # =====================
-    # B3: XỬ LÝ KẾT QUẢ
+    # B3 BUILD RESULT
     # =====================
+
     for idx in top_indices:
 
         title = str(df.iloc[idx]["title"])
@@ -142,7 +150,6 @@ def search():
 
         mismatches = []
 
-        # kiểm tra số liệu
         for q in query_numbers:
 
             if q not in article_numbers:
@@ -159,31 +166,44 @@ def search():
                 })
 
         results.append({
+
             "title": title,
             "summary": summary,
             "link": link,
             "source": source,
             "score": round(score, 2),
             "mismatches": mismatches
+
         })
 
     # =====================
-    # B4: KHÔNG TÌM THẤY
+    # B4 NOT FOUND
     # =====================
-    if results[0]["score"] < 0.35:
+
+    if results[0]["score"] < 0.25:
 
         return jsonify({
+
             "status": "not_found",
-            "message": "⚠ Không tìm thấy bài báo khớp hoàn toàn. Dưới đây là các bài gần đúng.",
+
+            "message":
+                "⚠ Không tìm thấy bài báo khớp hoàn toàn. "
+                "Dưới đây là các bài gần đúng.",
+
             "results": results
         })
 
     # =====================
-    # B5: THÀNH CÔNG
+    # B5 SUCCESS
     # =====================
+
     return jsonify({
+
         "status": "success",
-        "message": "✅ Đã tìm thấy bài báo phù hợp",
+
+        "message":
+            "✅ Đã tìm thấy bài báo phù hợp",
+
         "results": results
     })
 
@@ -191,4 +211,7 @@ def search():
 # =========================
 # RUN
 # =========================
-app.run(host="0.0.0.0", port=5000)
+app.run(
+    host="0.0.0.0",
+    port=5000
+)
