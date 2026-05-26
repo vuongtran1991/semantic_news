@@ -24,7 +24,7 @@ vectorizer = TfidfVectorizer()
 news_vectors = None
 
 # =========================
-# RSS
+# RSS CHÍNH THỐNG
 # =========================
 
 rss_urls = {
@@ -61,7 +61,7 @@ rss_urls = {
 }
 
 # =========================
-# GIẬT GÂN
+# TỪ GIẬT GÂN
 # =========================
 
 CLICKBAIT_WORDS = [
@@ -75,7 +75,7 @@ CLICKBAIT_WORDS = [
 ]
 
 # =========================
-# CRAWL NEWS
+# CRAWL RSS
 # =========================
 
 def crawl_news():
@@ -93,6 +93,7 @@ def crawl_news():
 
             feed = feedparser.parse(url)
 
+            # mỗi báo lấy 10 bài mới nhất
             for entry in feed.entries[:10]:
 
                 all_articles.append({
@@ -118,19 +119,21 @@ def crawl_news():
     print("Loaded", len(df), "articles")
 
     # =====================
-    # VECTOR NHẸ
+    # VECTORIZE
     # =====================
 
-    texts = (
+    if not df.empty:
 
-        df["title"].fillna('') + " " +
-        df["summary"].fillna('')
+        texts = (
 
-    ).tolist()
+            df["title"].fillna('') + " " +
+            df["summary"].fillna('')
 
-    news_vectors = vectorizer.fit_transform(texts)
+        ).tolist()
 
-    print("Vectors updated!")
+        news_vectors = vectorizer.fit_transform(texts)
+
+        print("Vectors updated!")
 
 # =========================
 # AUTO UPDATE
@@ -142,10 +145,11 @@ def auto_update():
 
         crawl_news()
 
+        # 30 phút cập nhật 1 lần
         time.sleep(1800)
 
 # =========================
-# EXTRACT NUMBER
+# TÁCH SỐ / % / NGÀY
 # =========================
 
 def extract_numbers(text):
@@ -155,7 +159,7 @@ def extract_numbers(text):
     return re.findall(pattern, text)
 
 # =========================
-# CLICKBAIT
+# CHECK GIẬT GÂN
 # =========================
 
 def detect_clickbait(text):
@@ -179,7 +183,7 @@ def home():
     return "Semantic News API is running!"
 
 # =========================
-# DEBUG NEWS
+# DEBUG XEM BÀI BÁO
 # =========================
 
 @app.route("/news")
@@ -190,18 +194,31 @@ def get_news():
     )
 
 # =========================
+# DEBUG ĐẾM BÀI
+# =========================
+
+@app.route("/count")
+def count_news():
+
+    return jsonify({
+        "total": len(df)
+    })
+
+# =========================
 # SEARCH
 # =========================
 
 @app.route("/search", methods=["POST"])
 def search():
 
+    global news_vectors
+
     data = request.json
 
     query = data["query"]
 
     # =====================
-    # GIẬT GÂN
+    # CHECK GIẬT GÂN
     # =====================
 
     clickbait = detect_clickbait(query)
@@ -214,6 +231,22 @@ def search():
 
             "message":
             f"❌ Phát hiện từ giật gân: {clickbait}",
+
+            "results": []
+        })
+
+    # =====================
+    # CHƯA CÓ DỮ LIỆU
+    # =====================
+
+    if df.empty or news_vectors is None:
+
+        return jsonify({
+
+            "status": "empty",
+
+            "message":
+            "⚠ Server chưa tải xong dữ liệu báo",
 
             "results": []
         })
@@ -235,6 +268,10 @@ def search():
 
     query_numbers = extract_numbers(query)
 
+    # =====================
+    # TOP 5
+    # =====================
+
     for idx in top_indices:
 
         title = str(df.iloc[idx]["title"])
@@ -254,6 +291,10 @@ def search():
         )
 
         mismatches = []
+
+        # =====================
+        # CHECK SỐ LIỆU
+        # =====================
 
         for q in query_numbers:
 
@@ -288,7 +329,7 @@ def search():
         })
 
     # =====================
-    # NOT FOUND
+    # KHÔNG KHỚP HOÀN TOÀN
     # =====================
 
     if results[0]["score"] < 0.15:
