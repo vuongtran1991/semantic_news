@@ -376,19 +376,16 @@ def search():
     # =====================
     # B4: KHÔNG KHỚP HOÀN TOÀN
     # =====================
-
     if results[0]["score"] < 0.15:
+        # Lấy độ khớp cao nhất hiện tại để gửi về
+        highest_score = results[0]["score"]
 
         return jsonify({
-
             "status": "not_found",
-
-            "message":
-            "⚠ Không tìm thấy bài khớp hoàn toàn. Dưới đây là các bài gần đúng.",
-
-            "results": results
+            "message": "⚠ Không tìm thấy thông tin này trên các báo chính thống.",
+            "highest_score": highest_score, # Chỉ gửi độ khớp cao nhất
+            "results": [] # Trả về mảng rỗng để chặn không cho hiển thị bài báo & link
         })
-
     # =====================
     # B5: SUCCESS
     # =====================
