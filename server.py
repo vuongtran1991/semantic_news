@@ -98,7 +98,7 @@ def crawl_news():
             count = 0
 
             # mỗi báo lấy 5 bài
-            for entry in feed.entries[:10]:
+            for entry in feed.entries[:5]:
 
                 link = getattr(entry, 'link', '')
 
