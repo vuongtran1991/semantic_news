@@ -162,7 +162,7 @@ def auto_update():
 
         crawl_news()
 
-        # 30 phút cập nhật 1 lần
+        # 30 phút cập nhật
         time.sleep(1800)
 
 # =========================
@@ -171,7 +171,10 @@ def auto_update():
 
 def extract_numbers(text):
 
-    pattern = r'\d{1,2}/\d{1,2}/\d{2,4}|\d+[.,]?\d*%?'
+    pattern = (
+        r'\d{1,2}[/-]\d{1,2}([/-]\d{2,4})?'
+        r'|\d+[.,]?\d*%?'
+    )
 
     return re.findall(pattern, text)
 
@@ -235,7 +238,7 @@ def search():
     query = data["query"]
 
     # =====================
-    # CHECK GIẬT GÂN
+    # B1: CHECK GIẬT GÂN
     # =====================
 
     clickbait = detect_clickbait(query)
@@ -269,7 +272,7 @@ def search():
         })
 
     # =====================
-    # SEARCH NHANH
+    # B2: SEARCH
     # =====================
 
     query_vector = vectorizer.transform([query])
@@ -310,17 +313,26 @@ def search():
         mismatches = []
 
         # =====================
-        # CHECK SỐ LIỆU
+        # CHECK SỐ / NGÀY
         # =====================
 
         for q in query_numbers:
 
-            if q not in article_numbers:
+            found = False
+
+            for a in article_numbers:
+
+                if q == a:
+
+                    found = True
+                    break
+
+            if not found:
 
                 correct_value = (
 
                     article_numbers[0]
-                    if article_numbers
+                    if len(article_numbers) > 0
                     else "Không có"
                 )
 
@@ -346,7 +358,23 @@ def search():
         })
 
     # =====================
-    # KHÔNG KHỚP HOÀN TOÀN
+    # B3: SAI LỆCH SỐ LIỆU
+    # =====================
+
+    if len(results[0]["mismatches"]) > 0:
+
+        return jsonify({
+
+            "status": "mismatch",
+
+            "message":
+            "⚠ Có sai lệch số liệu hoặc ngày tháng",
+
+            "results": results
+        })
+
+    # =====================
+    # B4: KHÔNG KHỚP HOÀN TOÀN
     # =====================
 
     if results[0]["score"] < 0.15:
@@ -362,7 +390,7 @@ def search():
         })
 
     # =====================
-    # SUCCESS
+    # B5: SUCCESS
     # =====================
 
     return jsonify({
