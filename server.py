@@ -7,6 +7,9 @@ import re
 import threading
 import time
 
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
 app = Flask(__name__)
 CORS(app)
 
@@ -14,12 +17,14 @@ CORS(app)
 # DATA
 # =========================
 
-model = None
-news_vectors = None
 df = pd.DataFrame()
 
+vectorizer = TfidfVectorizer()
+
+news_vectors = None
+
 # =========================
-# RSS CHÍNH THỐNG
+# RSS
 # =========================
 
 rss_urls = {
@@ -39,15 +44,6 @@ rss_urls = {
     "Vietnamnet":
     "https://vietnamnet.vn/rss/home.rss",
 
-    "TienPhong":
-    "https://tienphong.vn/rss/home.rss",
-
-    "LaoDong":
-    "https://laodong.vn/rss/home.rss",
-
-    "NguoiLaoDong":
-    "https://nld.com.vn/rss/home.rss",
-
     "BaoChinhPhu":
     "https://baochinhphu.vn/rss/home.rss",
 
@@ -65,7 +61,7 @@ rss_urls = {
 }
 
 # =========================
-# TỪ GIẬT GÂN
+# GIẬT GÂN
 # =========================
 
 CLICKBAIT_WORDS = [
@@ -79,27 +75,7 @@ CLICKBAIT_WORDS = [
 ]
 
 # =========================
-# LOAD AI
-# =========================
-
-def load_ai():
-
-    global model
-
-    if model is None:
-
-        print("Loading AI model...")
-
-        from sentence_transformers import SentenceTransformer
-
-        model = SentenceTransformer(
-            'all-MiniLM-L6-v2'
-        )
-
-        print("AI ready!")
-
-# =========================
-# CRAWL RSS
+# CRAWL NEWS
 # =========================
 
 def crawl_news():
@@ -117,7 +93,6 @@ def crawl_news():
 
             feed = feedparser.parse(url)
 
-            # mỗi báo chỉ lấy 10 bài
             for entry in feed.entries[:10]:
 
                 all_articles.append({
@@ -138,25 +113,24 @@ def crawl_news():
 
             print("RSS ERROR:", source, e)
 
-    # cập nhật mới hoàn toàn
     df = pd.DataFrame(all_articles)
 
     print("Loaded", len(df), "articles")
 
-    # tạo vector semantic
+    # =====================
+    # VECTOR NHẸ
+    # =====================
 
-    if model is not None and not df.empty:
+    texts = (
 
-        texts = (
+        df["title"].fillna('') + " " +
+        df["summary"].fillna('')
 
-            df["title"].fillna('') + " " +
-            df["summary"].fillna('')
+    ).tolist()
 
-        ).tolist()
+    news_vectors = vectorizer.fit_transform(texts)
 
-        news_vectors = model.encode(texts)
-
-        print("Vectors updated!")
+    print("Vectors updated!")
 
 # =========================
 # AUTO UPDATE
@@ -168,11 +142,10 @@ def auto_update():
 
         crawl_news()
 
-        # 30 phút cập nhật 1 lần
         time.sleep(1800)
 
 # =========================
-# TÁCH SỐ / % / NGÀY
+# EXTRACT NUMBER
 # =========================
 
 def extract_numbers(text):
@@ -182,7 +155,7 @@ def extract_numbers(text):
     return re.findall(pattern, text)
 
 # =========================
-# CHECK GIẬT GÂN
+# CLICKBAIT
 # =========================
 
 def detect_clickbait(text):
@@ -206,7 +179,7 @@ def home():
     return "Semantic News API is running!"
 
 # =========================
-# DEBUG XEM BÀI BÁO
+# DEBUG NEWS
 # =========================
 
 @app.route("/news")
@@ -217,31 +190,18 @@ def get_news():
     )
 
 # =========================
-# DEBUG ĐẾM BÀI
-# =========================
-
-@app.route("/count")
-def count_news():
-
-    return jsonify({
-        "total": len(df)
-    })
-
-# =========================
 # SEARCH
 # =========================
 
 @app.route("/search", methods=["POST"])
 def search():
 
-    global news_vectors
-
     data = request.json
 
     query = data["query"]
 
     # =====================
-    # CHECK GIẬT GÂN
+    # GIẬT GÂN
     # =====================
 
     clickbait = detect_clickbait(query)
@@ -259,19 +219,10 @@ def search():
         })
 
     # =====================
-    # LOAD AI
+    # SEARCH NHANH
     # =====================
 
-    load_ai()
-
-    from sklearn.metrics.pairwise import cosine_similarity
-
-    # nếu chưa có vector
-    if news_vectors is None:
-
-        crawl_news()
-
-    query_vector = model.encode([query])
+    query_vector = vectorizer.transform([query])
 
     scores = cosine_similarity(
         query_vector,
@@ -283,10 +234,6 @@ def search():
     results = []
 
     query_numbers = extract_numbers(query)
-
-    # =====================
-    # TOP 5
-    # =====================
 
     for idx in top_indices:
 
@@ -307,8 +254,6 @@ def search():
         )
 
         mismatches = []
-
-        # check số liệu
 
         for q in query_numbers:
 
@@ -343,10 +288,10 @@ def search():
         })
 
     # =====================
-    # KHÔNG KHỚP HOÀN TOÀN
+    # NOT FOUND
     # =====================
 
-    if results[0]["score"] < 0.30:
+    if results[0]["score"] < 0.15:
 
         return jsonify({
 
