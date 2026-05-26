@@ -91,9 +91,13 @@ def crawl_news():
 
         try:
 
+            print(f"\nLoading: {source}")
+
             feed = feedparser.parse(url)
 
-            # mỗi báo chỉ lấy 5 bài
+            count = 0
+
+            # mỗi báo lấy 5 bài
             for entry in feed.entries[:5]:
 
                 link = getattr(entry, 'link', '')
@@ -118,14 +122,18 @@ def crawl_news():
                     "link": link
                 })
 
+                count += 1
+
+            print(f"{source}: {count} articles")
+
         except Exception as e:
 
-            print("RSS ERROR:", source, e)
+            print(f"RSS ERROR {source}: {e}")
 
     # cập nhật mới hoàn toàn
     df = pd.DataFrame(all_articles)
 
-    print("Loaded", len(df), "articles")
+    print("\nTOTAL ARTICLES:", len(df))
 
     # =====================
     # VECTORIZE
@@ -163,7 +171,7 @@ def auto_update():
 
 def extract_numbers(text):
 
-    pattern = r'\d{1,2}/\d{1,2}/\d{2,4}|\d+%?'
+    pattern = r'\d{1,2}/\d{1,2}/\d{2,4}|\d+[.,]?\d*%?'
 
     return re.findall(pattern, text)
 
@@ -245,7 +253,7 @@ def search():
         })
 
     # =====================
-    # CHƯA LOAD XONG
+    # SERVER CHƯA LOAD
     # =====================
 
     if df.empty or news_vectors is None:
