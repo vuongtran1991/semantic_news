@@ -30,10 +30,10 @@ news_vectors = None
 rss_urls = {
 
     "VnExpress":
-    "https://vnexpress.net/rss/tin-moi-nhat.rss",
+    "https://vnexpress.net/rss/home.rss",
 
     "TuoiTre":
-    "https://tuoitre.vn/rss/tin-moi-nhat.rss",
+    "https://tuoitre.vn/rss/home.rss",
 
     "ThanhNien":
     "https://thanhnien.vn/rss/home.rss",
@@ -93,8 +93,17 @@ def crawl_news():
 
             feed = feedparser.parse(url)
 
-            # mỗi báo lấy 10 bài mới nhất
-            for entry in feed.entries[:10]:
+            # mỗi báo chỉ lấy 5 bài
+            for entry in feed.entries[:5]:
+
+                link = getattr(entry, 'link', '')
+
+                # làm sạch link
+                link = (
+                    link.replace('%22', '')
+                        .replace('"', '')
+                        .strip()
+                )
 
                 all_articles.append({
 
@@ -106,14 +115,14 @@ def crawl_news():
                     "summary":
                     getattr(entry, 'summary', ''),
 
-                    "link":
-                    getattr(entry, 'link', '')
+                    "link": link
                 })
 
         except Exception as e:
 
             print("RSS ERROR:", source, e)
 
+    # cập nhật mới hoàn toàn
     df = pd.DataFrame(all_articles)
 
     print("Loaded", len(df), "articles")
@@ -236,7 +245,7 @@ def search():
         })
 
     # =====================
-    # CHƯA CÓ DỮ LIỆU
+    # CHƯA LOAD XONG
     # =====================
 
     if df.empty or news_vectors is None:
@@ -246,7 +255,7 @@ def search():
             "status": "empty",
 
             "message":
-            "⚠ Server chưa tải xong dữ liệu báo",
+            "⚠ Server chưa tải xong dữ liệu",
 
             "results": []
         })
