@@ -4,3 +4,4 @@ pandas
 feedparser
 scikit-learn
 requests
+beautifulsoup4

@@ -7,6 +7,7 @@ import requests
 import re
 import threading
 import time
+import os
 
 from bs4 import BeautifulSoup
 
@@ -118,10 +119,6 @@ def crawl_news():
 
     all_articles = []
 
-    # =====================
-    # MỖI BÁO 1 BÀI
-    # =====================
-
     for source, url in rss_urls.items():
 
         try:
@@ -156,8 +153,7 @@ def crawl_news():
                 ''
             )
 
-            # làm sạch link
-
+            # Làm sạch link
             link = (
                 link.replace('%22', '')
                     .replace('"', '')
@@ -504,14 +500,18 @@ def search():
 # START
 # =========================
 
-crawl_news()
+if __name__ == "__main__":
 
-threading.Thread(
-    target=auto_update,
-    daemon=True
-).start()
+    crawl_news()
 
-app.run(
-    host="0.0.0.0",
-    port=5000
-)
+    threading.Thread(
+        target=auto_update,
+        daemon=True
+    ).start()
+
+    port = int(os.environ.get("PORT", 10000))
+
+    app.run(
+        host="0.0.0.0",
+        port=port
+    )
