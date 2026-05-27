@@ -24,7 +24,7 @@ vectorizer = TfidfVectorizer()
 news_vectors = None
 
 # =========================
-# RSS CHÍNH THỐNG
+# RSS
 # =========================
 
 rss_urls = {
@@ -40,24 +40,6 @@ rss_urls = {
 
     "DanTri":
     "https://dantri.com.vn/rss/home.rss",
-
-    "Vietnamnet":
-    "https://vietnamnet.vn/rss/home.rss",
-
-    "BaoChinhPhu":
-    "https://baochinhphu.vn/rss/home.rss",
-
-    "BaoNhanDan":
-    "https://nhandan.vn/rss/home.rss",
-
-    "BoYTe":
-    "https://moh.gov.vn/rss/-/asset_publisher/7ng11fEWgASC/rss",
-
-    "BoGiaoDuc":
-    "https://moet.gov.vn/rss/Pages/index.aspx",
-
-    "QuocHoi":
-    "https://quochoi.vn/rss/default.aspx"
 }
 
 # =========================
@@ -75,7 +57,7 @@ CLICKBAIT_WORDS = [
 ]
 
 # =========================
-# CRAWL RSS
+# CRAWL NEWS
 # =========================
 
 def crawl_news():
@@ -91,18 +73,13 @@ def crawl_news():
 
         try:
 
-            print(f"\nLoading: {source}")
-
             feed = feedparser.parse(url)
-
-            count = 0
 
             # mỗi báo lấy 5 bài
             for entry in feed.entries[:5]:
 
                 link = getattr(entry, 'link', '')
 
-                # làm sạch link
                 link = (
                     link.replace('%22', '')
                         .replace('"', '')
@@ -122,22 +99,15 @@ def crawl_news():
                     "link": link
                 })
 
-                count += 1
-
-            print(f"{source}: {count} articles")
-
         except Exception as e:
 
-            print(f"RSS ERROR {source}: {e}")
+            print("RSS ERROR:", source, e)
 
-    # cập nhật mới hoàn toàn
     df = pd.DataFrame(all_articles)
 
-    print("\nTOTAL ARTICLES:", len(df))
+    print("TOTAL ARTICLES:", len(df))
 
-    # =====================
     # VECTORIZE
-    # =====================
 
     if not df.empty:
 
@@ -162,24 +132,24 @@ def auto_update():
 
         crawl_news()
 
-        # 30 phút cập nhật
+        # 30 phút
         time.sleep(1800)
 
 # =========================
-# TÁCH SỐ / % / NGÀY
+# TÁCH SỐ
 # =========================
 
 def extract_numbers(text):
 
     pattern = (
-        r'\d{1,2}[/-]\d{1,2}([/-]\d{2,4})?'
+        r'\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?'
         r'|\d+[.,]?\d*%?'
     )
 
     return re.findall(pattern, text)
 
 # =========================
-# CHECK GIẬT GÂN
+# GIẬT GÂN
 # =========================
 
 def detect_clickbait(text):
@@ -203,7 +173,7 @@ def home():
     return "Semantic News API is running!"
 
 # =========================
-# DEBUG XEM BÀI BÁO
+# DEBUG
 # =========================
 
 @app.route("/news")
@@ -212,10 +182,6 @@ def get_news():
     return jsonify(
         df.to_dict(orient="records")
     )
-
-# =========================
-# DEBUG ĐẾM BÀI
-# =========================
 
 @app.route("/count")
 def count_news():
@@ -238,7 +204,7 @@ def search():
     query = data["query"]
 
     # =====================
-    # B1: CHECK GIẬT GÂN
+    # CLICKBAIT
     # =====================
 
     clickbait = detect_clickbait(query)
@@ -272,7 +238,7 @@ def search():
         })
 
     # =====================
-    # B2: SEARCH
+    # SEARCH
     # =====================
 
     query_vector = vectorizer.transform([query])
@@ -287,10 +253,6 @@ def search():
     results = []
 
     query_numbers = extract_numbers(query)
-
-    # =====================
-    # TOP 5
-    # =====================
 
     for idx in top_indices:
 
@@ -312,9 +274,7 @@ def search():
 
         mismatches = []
 
-        # =====================
-        # CHECK SỐ / NGÀY
-        # =====================
+        # CHECK SỐ LIỆU
 
         for q in query_numbers:
 
@@ -358,7 +318,7 @@ def search():
         })
 
     # =====================
-    # B3: SAI LỆCH SỐ LIỆU
+    # SAI LỆCH
     # =====================
 
     if len(results[0]["mismatches"]) > 0:
@@ -374,20 +334,27 @@ def search():
         })
 
     # =====================
-    # B4: KHÔNG KHỚP HOÀN TOÀN
+    # KHÔNG TÌM THẤY
     # =====================
+
     if results[0]["score"] < 0.15:
-        # Lấy độ khớp cao nhất hiện tại để gửi về
+
         highest_score = results[0]["score"]
 
         return jsonify({
+
             "status": "not_found",
-            "message": "⚠ Không tìm thấy thông tin này trên các báo chính thống.",
-            "highest_score": highest_score, # Chỉ gửi độ khớp cao nhất
-            "results": [] # Trả về mảng rỗng để chặn không cho hiển thị bài báo & link
+
+            "message":
+            "⚠ Không tìm thấy thông tin này trên báo chính thống.",
+
+            "highest_score": highest_score,
+
+            "results": []
         })
+
     # =====================
-    # B5: SUCCESS
+    # SUCCESS
     # =====================
 
     return jsonify({
