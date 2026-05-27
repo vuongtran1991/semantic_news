@@ -3,9 +3,12 @@ from flask_cors import CORS
 
 import pandas as pd
 import feedparser
+import requests
 import re
 import threading
 import time
+
+from bs4 import BeautifulSoup
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -42,22 +45,7 @@ rss_urls = {
     "https://dantri.com.vn/rss/home.rss",
 
     "Vietnamnet":
-    "https://vietnamnet.vn/rss/home.rss",
-
-    "BaoChinhPhu":
-    "https://baochinhphu.vn/rss/home.rss",
-
-    "BaoNhanDan":
-    "https://nhandan.vn/rss/home.rss",
-
-    "BoYTe":
-    "https://moh.gov.vn/rss/-/asset_publisher/7ng11fEWgASC/rss",
-
-    "BoGiaoDuc":
-    "https://moet.gov.vn/rss/Pages/index.aspx",
-
-    "QuocHoi":
-    "https://quochoi.vn/rss/default.aspx"
+    "https://vietnamnet.vn/rss/home.rss"
 }
 
 # =========================
@@ -75,6 +63,49 @@ CLICKBAIT_WORDS = [
 ]
 
 # =========================
+# LẤY NỘI DUNG BÀI BÁO
+# =========================
+
+def get_article_content(url):
+
+    try:
+
+        headers = {
+            "User-Agent":
+            "Mozilla/5.0"
+        }
+
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=10
+        )
+
+        soup = BeautifulSoup(
+            response.text,
+            "html.parser"
+        )
+
+        paragraphs = soup.find_all("p")
+
+        content = ""
+
+        for p in paragraphs:
+
+            text = p.get_text().strip()
+
+            if len(text) > 40:
+                content += text + " "
+
+        return content[:5000]
+
+    except Exception as e:
+
+        print("CONTENT ERROR:", e)
+
+        return ""
+
+# =========================
 # CRAWL RSS
 # =========================
 
@@ -87,6 +118,10 @@ def crawl_news():
 
     all_articles = []
 
+    # =====================
+    # MỖI BÁO 1 BÀI
+    # =====================
+
     for source, url in rss_urls.items():
 
         try:
@@ -95,46 +130,77 @@ def crawl_news():
 
             feed = feedparser.parse(url)
 
-            count = 0
+            if len(feed.entries) == 0:
 
-            # mỗi báo lấy 5 bài
-            for entry in feed.entries[:5]:
+                print("No article")
 
-                link = getattr(entry, 'link', '')
+                continue
 
-                link = (
-                    link.replace('%22', '')
-                        .replace('"', '')
-                        .strip()
-                )
+            entry = feed.entries[0]
 
-                all_articles.append({
+            title = getattr(
+                entry,
+                'title',
+                ''
+            )
 
-                    "source": source,
+            summary = getattr(
+                entry,
+                'summary',
+                ''
+            )
 
-                    "title":
-                    getattr(entry, 'title', ''),
+            link = getattr(
+                entry,
+                'link',
+                ''
+            )
 
-                    "summary":
-                    getattr(entry, 'summary', ''),
+            # làm sạch link
 
-                    "link": link
-                })
+            link = (
+                link.replace('%22', '')
+                    .replace('"', '')
+                    .strip()
+            )
 
-                count += 1
+            print("Reading content...")
 
-            print(f"{source}: {count} articles")
+            content = get_article_content(
+                link
+            )
+
+            print(
+                f"Content length: {len(content)}"
+            )
+
+            all_articles.append({
+
+                "source": source,
+
+                "title": title,
+
+                "summary": summary,
+
+                "content": content,
+
+                "link": link
+            })
 
         except Exception as e:
 
             print(f"RSS ERROR {source}: {e}")
+
+    # =====================
+    # DATAFRAME
+    # =====================
 
     df = pd.DataFrame(all_articles)
 
     print("\nTOTAL ARTICLES:", len(df))
 
     # =====================
-    # VECTORIZE
+    # TF-IDF
     # =====================
 
     if not df.empty:
@@ -142,11 +208,13 @@ def crawl_news():
         texts = (
 
             df["title"].fillna('') + " " +
-            df["summary"].fillna('')
-
+            df["summary"].fillna('') + " " +
+            df["content"].fillna('')
         ).tolist()
 
-        news_vectors = vectorizer.fit_transform(texts)
+        news_vectors = vectorizer.fit_transform(
+            texts
+        )
 
         print("Vectors updated!")
 
@@ -158,26 +226,43 @@ def auto_update():
 
     while True:
 
-        crawl_news()
-
-        # 30 phút cập nhật
         time.sleep(1800)
 
+        crawl_news()
+
 # =========================
-# TÁCH SỐ / % / NGÀY
+# TÁCH SỐ / NGÀY
 # =========================
 
 def extract_numbers(text):
 
     pattern = (
-        r'\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?'
-        r'|\d+[.,]?\d*%?'
+
+        r'\d{1,2}[/-]\d{1,2}([/-]\d{2,4})?'
+        r'|\d+[.,]?\d*\s?(?:%|độ|°c|người|ca)?'
     )
 
-    return re.findall(pattern, text)
+    matches = re.findall(
+        pattern,
+        text.lower()
+    )
+
+    result = []
+
+    for m in matches:
+
+        if isinstance(m, tuple):
+
+            result.append(m[0])
+
+        else:
+
+            result.append(m)
+
+    return result
 
 # =========================
-# CHECK GIẬT GÂN
+# GIẬT GÂN
 # =========================
 
 def detect_clickbait(text):
@@ -201,7 +286,7 @@ def home():
     return "Semantic News API is running!"
 
 # =========================
-# DEBUG NEWS
+# XEM BÀI ĐÃ LOAD
 # =========================
 
 @app.route("/news")
@@ -212,13 +297,14 @@ def get_news():
     )
 
 # =========================
-# COUNT
+# ĐẾM BÀI
 # =========================
 
 @app.route("/count")
 def count_news():
 
     return jsonify({
+
         "total": len(df)
     })
 
@@ -236,7 +322,7 @@ def search():
     query = data["query"]
 
     # =====================
-    # CHECK GIẬT GÂN
+    # GIẬT GÂN
     # =====================
 
     clickbait = detect_clickbait(query)
@@ -254,7 +340,7 @@ def search():
         })
 
     # =====================
-    # SERVER CHƯA LOAD
+    # CHƯA LOAD
     # =====================
 
     if df.empty or news_vectors is None:
@@ -270,10 +356,12 @@ def search():
         })
 
     # =====================
-    # SEARCH
+    # TF-IDF SEARCH
     # =====================
 
-    query_vector = vectorizer.transform([query])
+    query_vector = vectorizer.transform(
+        [query]
+    )
 
     scores = cosine_similarity(
         query_vector,
@@ -286,11 +374,17 @@ def search():
 
     query_numbers = extract_numbers(query)
 
+    # =====================
+    # TOP RESULTS
+    # =====================
+
     for idx in top_indices:
 
         title = str(df.iloc[idx]["title"])
 
         summary = str(df.iloc[idx]["summary"])
+
+        content = str(df.iloc[idx]["content"])
 
         link = str(df.iloc[idx]["link"])
 
@@ -298,7 +392,11 @@ def search():
 
         score = float(scores[idx])
 
-        article_text = title + " " + summary
+        article_text = (
+            title + " " +
+            summary + " " +
+            content
+        )
 
         article_numbers = extract_numbers(
             article_text
@@ -333,7 +431,9 @@ def search():
                 mismatches.append({
 
                     "user": q,
-                    "official": correct_value
+
+                    "official":
+                    correct_value
                 })
 
         results.append({
@@ -352,7 +452,7 @@ def search():
         })
 
     # =====================
-    # KHÔNG TÌM THẤY
+    # SCORE THẤP
     # =====================
 
     if results[0]["score"] < 0.30:
@@ -371,7 +471,7 @@ def search():
         })
 
     # =====================
-    # SAI LỆCH SỐ LIỆU
+    # SAI LỆCH
     # =====================
 
     if len(results[0]["mismatches"]) > 0:
@@ -382,22 +482,6 @@ def search():
 
             "message":
             "⚠ Có sai lệch số liệu",
-
-            "results": results
-        })
-
-    # =====================
-    # LIÊN QUAN THẤP
-    # =====================
-
-    if results[0]["score"] < 0.60:
-
-        return jsonify({
-
-            "status": "low_confidence",
-
-            "message":
-            "⚠ Có liên quan nhưng chưa đủ tin cậy",
 
             "results": results
         })
