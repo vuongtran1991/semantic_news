@@ -3,3 +3,4 @@ flask-cors
 pandas
 feedparser
 scikit-learn
+requests
