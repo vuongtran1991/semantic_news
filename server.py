@@ -24,7 +24,7 @@ vectorizer = TfidfVectorizer()
 news_vectors = None
 
 # =========================
-# RSS
+# RSS CHÍNH THỐNG
 # =========================
 
 rss_urls = {
@@ -40,6 +40,24 @@ rss_urls = {
 
     "DanTri":
     "https://dantri.com.vn/rss/home.rss",
+
+    "Vietnamnet":
+    "https://vietnamnet.vn/rss/home.rss",
+
+    "BaoChinhPhu":
+    "https://baochinhphu.vn/rss/home.rss",
+
+    "BaoNhanDan":
+    "https://nhandan.vn/rss/home.rss",
+
+    "BoYTe":
+    "https://moh.gov.vn/rss/-/asset_publisher/7ng11fEWgASC/rss",
+
+    "BoGiaoDuc":
+    "https://moet.gov.vn/rss/Pages/index.aspx",
+
+    "QuocHoi":
+    "https://quochoi.vn/rss/default.aspx"
 }
 
 # =========================
@@ -57,7 +75,7 @@ CLICKBAIT_WORDS = [
 ]
 
 # =========================
-# CRAWL NEWS
+# CRAWL RSS
 # =========================
 
 def crawl_news():
@@ -73,7 +91,11 @@ def crawl_news():
 
         try:
 
+            print(f"\nLoading: {source}")
+
             feed = feedparser.parse(url)
+
+            count = 0
 
             # mỗi báo lấy 5 bài
             for entry in feed.entries[:5]:
@@ -99,15 +121,21 @@ def crawl_news():
                     "link": link
                 })
 
+                count += 1
+
+            print(f"{source}: {count} articles")
+
         except Exception as e:
 
-            print("RSS ERROR:", source, e)
+            print(f"RSS ERROR {source}: {e}")
 
     df = pd.DataFrame(all_articles)
 
-    print("TOTAL ARTICLES:", len(df))
+    print("\nTOTAL ARTICLES:", len(df))
 
+    # =====================
     # VECTORIZE
+    # =====================
 
     if not df.empty:
 
@@ -132,11 +160,11 @@ def auto_update():
 
         crawl_news()
 
-        # 30 phút
+        # 30 phút cập nhật
         time.sleep(1800)
 
 # =========================
-# TÁCH SỐ
+# TÁCH SỐ / % / NGÀY
 # =========================
 
 def extract_numbers(text):
@@ -149,7 +177,7 @@ def extract_numbers(text):
     return re.findall(pattern, text)
 
 # =========================
-# GIẬT GÂN
+# CHECK GIẬT GÂN
 # =========================
 
 def detect_clickbait(text):
@@ -173,7 +201,7 @@ def home():
     return "Semantic News API is running!"
 
 # =========================
-# DEBUG
+# DEBUG NEWS
 # =========================
 
 @app.route("/news")
@@ -182,6 +210,10 @@ def get_news():
     return jsonify(
         df.to_dict(orient="records")
     )
+
+# =========================
+# COUNT
+# =========================
 
 @app.route("/count")
 def count_news():
@@ -204,7 +236,7 @@ def search():
     query = data["query"]
 
     # =====================
-    # CLICKBAIT
+    # CHECK GIẬT GÂN
     # =====================
 
     clickbait = detect_clickbait(query)
@@ -274,7 +306,9 @@ def search():
 
         mismatches = []
 
+        # =====================
         # CHECK SỐ LIỆU
+        # =====================
 
         for q in query_numbers:
 
@@ -318,7 +352,26 @@ def search():
         })
 
     # =====================
-    # SAI LỆCH
+    # KHÔNG TÌM THẤY
+    # =====================
+
+    if results[0]["score"] < 0.30:
+
+        return jsonify({
+
+            "status": "not_found",
+
+            "message":
+            "❌ Không tìm thấy trên báo chính thống",
+
+            "highest_score":
+            results[0]["score"],
+
+            "results": []
+        })
+
+    # =====================
+    # SAI LỆCH SỐ LIỆU
     # =====================
 
     if len(results[0]["mismatches"]) > 0:
@@ -328,29 +381,25 @@ def search():
             "status": "mismatch",
 
             "message":
-            "⚠ Có sai lệch số liệu hoặc ngày tháng",
+            "⚠ Có sai lệch số liệu",
 
             "results": results
         })
 
     # =====================
-    # KHÔNG TÌM THẤY
+    # LIÊN QUAN THẤP
     # =====================
 
-    if results[0]["score"] < 0.15:
-
-        highest_score = results[0]["score"]
+    if results[0]["score"] < 0.60:
 
         return jsonify({
 
-            "status": "not_found",
+            "status": "low_confidence",
 
             "message":
-            "⚠ Không tìm thấy thông tin này trên báo chính thống.",
+            "⚠ Có liên quan nhưng chưa đủ tin cậy",
 
-            "highest_score": highest_score,
-
-            "results": []
+            "results": results
         })
 
     # =====================
@@ -362,7 +411,7 @@ def search():
         "status": "success",
 
         "message":
-        "✅ Đã tìm thấy bài báo phù hợp",
+        "✅ Tin đáng tin",
 
         "results": results
     })
