@@ -23,7 +23,10 @@ CORS(app)
 
 df = pd.DataFrame()
 
-vectorizer = TfidfVectorizer()
+vectorizer = TfidfVectorizer(
+    stop_words=None,
+    lowercase=True
+)
 
 news_vectors = None
 
@@ -60,7 +63,23 @@ CLICKBAIT_WORDS = [
     "gây bão",
     "không thể tin",
     "chấn động",
-    "ngã ngửa"
+    "ngã ngửa",
+    "viral",
+    "rúng động"
+]
+
+# =========================
+# TỪ PHỦ ĐỊNH
+# =========================
+
+NEGATIVE_WORDS = [
+
+    "không",
+    "chưa",
+    "không có",
+    "không phải",
+    "bác bỏ",
+    "tin giả"
 ]
 
 # =========================
@@ -96,9 +115,10 @@ def get_article_content(url):
             text = p.get_text().strip()
 
             if len(text) > 40:
+
                 content += text + " "
 
-        return content[:5000]
+        return content[:4000]
 
     except Exception as e:
 
@@ -127,65 +147,73 @@ def crawl_news():
 
             feed = feedparser.parse(url)
 
-            if len(feed.entries) == 0:
+            count = 0
 
-                print("No article")
+            # =====================
+            # MỖI BÁO 3 BÀI
+            # =====================
 
-                continue
+            for entry in feed.entries[:3]:
 
-            entry = feed.entries[0]
+                title = getattr(
+                    entry,
+                    'title',
+                    ''
+                )
 
-            title = getattr(
-                entry,
-                'title',
-                ''
-            )
+                summary = getattr(
+                    entry,
+                    'summary',
+                    ''
+                )
 
-            summary = getattr(
-                entry,
-                'summary',
-                ''
-            )
+                link = getattr(
+                    entry,
+                    'link',
+                    ''
+                )
 
-            link = getattr(
-                entry,
-                'link',
-                ''
-            )
+                # làm sạch link
+                link = (
+                    link.replace('%22', '')
+                        .replace('"', '')
+                        .strip()
+                )
 
-            # Làm sạch link
-            link = (
-                link.replace('%22', '')
-                    .replace('"', '')
-                    .strip()
-            )
+                print("Reading content...")
 
-            print("Reading content...")
+                content = get_article_content(
+                    link
+                )
 
-            content = get_article_content(
-                link
-            )
+                print(
+                    f"Content length: {len(content)}"
+                )
+
+                all_articles.append({
+
+                    "source": source,
+
+                    "title": title,
+
+                    "summary": summary,
+
+                    "content": content,
+
+                    "link": link
+                })
+
+                count += 1
 
             print(
-                f"Content length: {len(content)}"
+                f"{source}: {count} articles"
             )
-
-            all_articles.append({
-
-                "source": source,
-
-                "title": title,
-
-                "summary": summary,
-
-                "content": content,
-
-                "link": link
-            })
 
         except Exception as e:
 
-            print(f"RSS ERROR {source}: {e}")
+            print(
+                f"RSS ERROR {source}: {e}"
+            )
 
     # =====================
     # DATAFRAME
@@ -196,7 +224,7 @@ def crawl_news():
     print("\nTOTAL ARTICLES:", len(df))
 
     # =====================
-    # TF-IDF
+    # TF-IDF VECTOR
     # =====================
 
     if not df.empty:
@@ -234,7 +262,7 @@ def extract_numbers(text):
 
     pattern = (
 
-        r'\d{1,2}[/-]\d{1,2}([/-]\d{2,4})?'
+        r'\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?'
         r'|\d+[.,]?\d*\s?(?:%|độ|°c|người|ca)?'
     )
 
@@ -243,22 +271,10 @@ def extract_numbers(text):
         text.lower()
     )
 
-    result = []
-
-    for m in matches:
-
-        if isinstance(m, tuple):
-
-            result.append(m[0])
-
-        else:
-
-            result.append(m)
-
-    return result
+    return matches
 
 # =========================
-# GIẬT GÂN
+# CHECK GIẬT GÂN
 # =========================
 
 def detect_clickbait(text):
@@ -273,6 +289,21 @@ def detect_clickbait(text):
     return None
 
 # =========================
+# CHECK PHỦ ĐỊNH
+# =========================
+
+def has_negative(text):
+
+    lower = text.lower()
+
+    for word in NEGATIVE_WORDS:
+
+        if word in lower:
+            return True
+
+    return False
+
+# =========================
 # HOME
 # =========================
 
@@ -282,7 +313,7 @@ def home():
     return "Semantic News API is running!"
 
 # =========================
-# XEM BÀI ĐÃ LOAD
+# DEBUG XEM BÀI
 # =========================
 
 @app.route("/news")
@@ -318,7 +349,7 @@ def search():
     query = data["query"]
 
     # =====================
-    # GIẬT GÂN
+    # CHECK GIẬT GÂN
     # =====================
 
     clickbait = detect_clickbait(query)
@@ -336,7 +367,7 @@ def search():
         })
 
     # =====================
-    # CHƯA LOAD
+    # SERVER CHƯA LOAD
     # =====================
 
     if df.empty or news_vectors is None:
@@ -370,6 +401,8 @@ def search():
 
     query_numbers = extract_numbers(query)
 
+    query_has_negative = has_negative(query)
+
     # =====================
     # TOP RESULTS
     # =====================
@@ -394,6 +427,19 @@ def search():
             content
         )
 
+        # =====================
+        # CHECK PHỦ ĐỊNH
+        # =====================
+
+        article_has_negative = has_negative(
+            article_text
+        )
+
+        # nếu phủ định không khớp
+        if query_has_negative != article_has_negative:
+
+            score *= 0.4
+
         article_numbers = extract_numbers(
             article_text
         )
@@ -401,7 +447,7 @@ def search():
         mismatches = []
 
         # =====================
-        # CHECK SỐ LIỆU
+        # CHECK SỐ / NGÀY
         # =====================
 
         for q in query_numbers:
@@ -448,6 +494,17 @@ def search():
         })
 
     # =====================
+    # SẮP XẾP LẠI SAU KHI
+    # GIẢM SCORE PHỦ ĐỊNH
+    # =====================
+
+    results = sorted(
+        results,
+        key=lambda x: x["score"],
+        reverse=True
+    )
+
+    # =====================
     # SCORE THẤP
     # =====================
 
@@ -467,7 +524,7 @@ def search():
         })
 
     # =====================
-    # SAI LỆCH
+    # SAI LỆCH SỐ LIỆU
     # =====================
 
     if len(results[0]["mismatches"]) > 0:
@@ -477,7 +534,7 @@ def search():
             "status": "mismatch",
 
             "message":
-            "⚠ Có sai lệch số liệu",
+            "⚠ Có sai lệch số liệu hoặc ngày tháng",
 
             "results": results
         })
@@ -509,7 +566,9 @@ if __name__ == "__main__":
         daemon=True
     ).start()
 
-    port = int(os.environ.get("PORT", 10000))
+    port = int(
+        os.environ.get("PORT", 10000)
+    )
 
     app.run(
         host="0.0.0.0",
