@@ -24,7 +24,8 @@ CORS(app)
 df = pd.DataFrame()
 
 vectorizer = TfidfVectorizer(
-    lowercase=True
+    lowercase=True,
+    ngram_range=(1, 2)
 )
 
 news_vectors = None
@@ -74,11 +75,26 @@ CLICKBAIT_WORDS = [
 NEGATIVE_WORDS = [
 
     "không",
+    "không phải",
     "không có",
     "chưa",
     "bác bỏ",
     "tin giả"
 ]
+
+# =========================
+# NORMALIZE TEXT
+# =========================
+
+def normalize_text(text):
+
+    text = str(text).lower()
+
+    text = re.sub(r'[-:]', ' ', text)
+
+    text = re.sub(r'\s+', ' ', text)
+
+    return text.strip()
 
 # =========================
 # LẤY NỘI DUNG BÀI BÁO
@@ -89,7 +105,6 @@ def get_article_content(url):
     try:
 
         headers = {
-
             "User-Agent":
             "Mozilla/5.0"
         }
@@ -172,7 +187,8 @@ def crawl_news():
                     ''
                 )
 
-                # làm sạch link
+                # Làm sạch link
+
                 link = (
                     link.replace('%22', '')
                         .replace('"', '')
@@ -223,7 +239,7 @@ def crawl_news():
     print("\nTOTAL ARTICLES:", len(df))
 
     # =====================
-    # TF-IDF VECTOR
+    # VECTORIZE
     # =====================
 
     if not df.empty:
@@ -233,7 +249,7 @@ def crawl_news():
             df["title"].fillna('') + " " +
             df["summary"].fillna('') + " " +
             df["content"].fillna('')
-        ).tolist()
+        ).apply(normalize_text).tolist()
 
         news_vectors = vectorizer.fit_transform(
             texts
@@ -254,7 +270,7 @@ def auto_update():
         crawl_news()
 
 # =========================
-# TÁCH SỐ / NGÀY
+# TÁCH SỐ / % / NGÀY
 # =========================
 
 def extract_numbers(text):
@@ -262,7 +278,7 @@ def extract_numbers(text):
     pattern = (
 
         r'\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?'
-        r'|\d+[.,]?\d*\s?(?:%|độ|°c|người|ca)?'
+        r'|\d+[.,]?\d*\s?(?:%|độ|°c|người|ca|triệu|tỷ)?'
     )
 
     matches = re.findall(
@@ -283,7 +299,6 @@ def detect_clickbait(text):
     for word in CLICKBAIT_WORDS:
 
         if word in lower:
-
             return word
 
     return None
@@ -299,7 +314,6 @@ def has_negative(text):
     for word in NEGATIVE_WORDS:
 
         if word in lower:
-
             return True
 
     return False
@@ -314,107 +328,85 @@ def home():
     return "Semantic News API is running!"
 
 # =========================
-# XEM TIN ĐẸP
+# XEM BÀI BÁO ĐÃ LOAD
 # =========================
 
 @app.route("/news")
 def get_news():
 
+    if df.empty:
+
+        return "<h2>Chưa có dữ liệu</h2>"
+
     html = """
 
     <html>
-
     <head>
-
         <meta charset="utf-8">
+        <title>Semantic News</title>
 
         <style>
 
             body{
-                font-family:Arial;
-                padding:20px;
-                background:#f5f5f5;
+                font-family: Arial;
+                margin: 30px;
             }
 
             .card{
-                background:white;
-                padding:20px;
+                border:1px solid #ccc;
+                padding:15px;
                 margin-bottom:20px;
                 border-radius:10px;
-                box-shadow:0 0 5px rgba(0,0,0,0.1);
             }
 
             .source{
-                color:blue;
+                color:green;
                 font-weight:bold;
-                margin-bottom:10px;
-            }
-
-            .title{
-                font-size:22px;
-                font-weight:bold;
-                margin-bottom:10px;
-            }
-
-            .summary{
-                color:#444;
-                margin-bottom:10px;
-            }
-
-            .content{
-                color:#666;
-                font-size:15px;
-                line-height:1.5;
             }
 
             a{
-                color:green;
-                text-decoration:none;
-                font-weight:bold;
+                color:blue;
             }
 
         </style>
-
     </head>
 
     <body>
 
-        <h1>Tin đã load từ báo chính thống</h1>
+    <h1>Danh sách bài báo đã load</h1>
 
     """
 
-    for i, row in df.iterrows():
+    for _, row in df.iterrows():
 
         html += f"""
 
         <div class="card">
 
             <div class="source">
-                Nguồn: {row['source']}
+                {row['source']}
             </div>
 
-            <div class="title">
+            <h3>
                 {row['title']}
-            </div>
+            </h3>
 
-            <div class="summary">
-                {row['summary'][:300]}
-            </div>
-
-            <br>
-
-            <div class="content">
-                {row['content'][:800]}...
-            </div>
-
-            <br>
+            <p>
+                {row['summary']}
+            </p>
 
             <a href="{row['link']}" target="_blank">
-                Mở bài báo
+                Đọc bài báo
             </a>
 
-        </div>
+            <br><br>
 
+            <small>
+                Nội dung đọc:
+                {row['content'][:300]}...
+            </small>
+
+        </div>
         """
 
     html += "</body></html>"
@@ -447,7 +439,7 @@ def search():
     query = data["query"]
 
     # =====================
-    # CHECK GIẬT GÂN
+    # GIẬT GÂN
     # =====================
 
     clickbait = detect_clickbait(query)
@@ -479,6 +471,12 @@ def search():
 
             "results": []
         })
+
+    # =====================
+    # NORMALIZE QUERY
+    # =====================
+
+    query = normalize_text(query)
 
     # =====================
     # TF-IDF SEARCH
@@ -519,7 +517,7 @@ def search():
 
         score = float(scores[idx])
 
-        article_text = (
+        article_text = normalize_text(
 
             title + " " +
             summary + " " +
@@ -538,15 +536,15 @@ def search():
 
             score *= 0.4
 
+        # =====================
+        # CHECK SỐ LIỆU
+        # =====================
+
         article_numbers = extract_numbers(
             article_text
         )
 
         mismatches = []
-
-        # =====================
-        # CHECK SỐ LIỆU
-        # =====================
 
         for q in query_numbers:
 
@@ -596,11 +594,8 @@ def search():
     # =====================
 
     results = sorted(
-
         results,
-
         key=lambda x: x["score"],
-
         reverse=True
     )
 
@@ -624,7 +619,7 @@ def search():
         })
 
     # =====================
-    # SAI LỆCH
+    # SAI LỆCH SỐ LIỆU
     # =====================
 
     if len(results[0]["mismatches"]) > 0:
