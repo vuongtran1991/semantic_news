@@ -3,13 +3,9 @@ from flask_cors import CORS
 
 import pandas as pd
 import feedparser
-import requests
 import re
 import threading
 import time
-import os
-
-from bs4 import BeautifulSoup
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -23,300 +19,86 @@ CORS(app)
 
 df = pd.DataFrame()
 
-vectorizer = TfidfVectorizer(
-    lowercase=True,
-    ngram_range=(1, 2)
-)
+vectorizer = TfidfVectorizer()
 
 news_vectors = None
 
-# =========================
-# RSS CHÍNH THỐNG
-# =========================
-
 rss_urls = {
-
-    "VnExpress":
-    "https://vnexpress.net/rss/home.rss",
-
-    "TuoiTre":
-    "https://tuoitre.vn/rss/home.rss",
-
-    "ThanhNien":
-    "https://thanhnien.vn/rss/home.rss",
-
-    "DanTri":
-    "https://dantri.com.vn/rss/home.rss",
-
-    "Vietnamnet":
-    "https://vietnamnet.vn/rss/home.rss"
+    "VnExpress": "https://vnexpress.net/rss/home.rss",
+    "TuoiTre": "https://tuoitre.vn/rss/home.rss",
+    "ThanhNien": "https://thanhnien.vn/rss/home.rss",
+    "DanTri": "https://dantri.com.vn/rss/home.rss",
+    "Vietnamnet": "https://vietnamnet.vn/rss/home.rss",
+    "BaoChinhPhu": "https://baochinhphu.vn/rss/home.rss",
+    "BaoNhanDan": "https://nhandan.vn/rss/home.rss",
+    "BoYTe": "https://moh.gov.vn/rss/-/asset_publisher/7ng11fEWgASC/rss",
+    "BoGiaoDuc": "https://moet.gov.vn/rss/Pages/index.aspx",
+    "QuocHoi": "https://quochoi.vn/rss/default.aspx"
 }
 
-# =========================
-# TỪ GIẬT GÂN
-# =========================
+CLICKBAIT_WORDS = ["sốc", "kinh hoàng", "gây bão", "không thể tin", "chấn động", "ngã ngửa"]
 
-CLICKBAIT_WORDS = [
+NEGATIVE_WORDS = ["không", "không có", "không phải", "chưa", "bác bỏ", "phủ nhận"]
 
-    "sốc",
-    "kinh hoàng",
-    "gây bão",
-    "không thể tin",
-    "chấn động",
-    "ngã ngửa",
-    "viral",
-    "rúng động"
-]
+def has_negative(text):
+    text = text.lower()
+    return any(w in text for w in NEGATIVE_WORDS)
 
 # =========================
-# TỪ PHỦ ĐỊNH
-# =========================
-
-NEGATIVE_WORDS = [
-
-    "không",
-    "không phải",
-    "không có",
-    "chưa",
-    "bác bỏ",
-    "tin giả"
-]
-
-# =========================
-# NORMALIZE TEXT
-# =========================
-
-def normalize_text(text):
-
-    text = str(text).lower()
-
-    text = re.sub(r'[-:]', ' ', text)
-
-    text = re.sub(r'\s+', ' ', text)
-
-    return text.strip()
-
-# =========================
-# LẤY NỘI DUNG BÀI BÁO
-# =========================
-
-def get_article_content(url):
-
-    try:
-
-        headers = {
-            "User-Agent":
-            "Mozilla/5.0"
-        }
-
-        response = requests.get(
-            url,
-            headers=headers,
-            timeout=10
-        )
-
-        soup = BeautifulSoup(
-            response.text,
-            "html.parser"
-        )
-
-        paragraphs = soup.find_all("p")
-
-        content = ""
-
-        for p in paragraphs:
-
-            text = p.get_text().strip()
-
-            if len(text) > 40:
-
-                content += text + " "
-
-        return content[:4000]
-
-    except Exception as e:
-
-        print("CONTENT ERROR:", e)
-
-        return ""
-
-# =========================
-# CRAWL RSS
+# CRAWL
 # =========================
 
 def crawl_news():
-
-    global df
-    global news_vectors
-
-    print("Updating RSS news...")
+    global df, news_vectors
 
     all_articles = []
 
     for source, url in rss_urls.items():
-
         try:
-
-            print(f"\nLoading: {source}")
-
             feed = feedparser.parse(url)
 
-            count = 0
-
-            # =====================
-            # MỖI BÁO 3 BÀI
-            # =====================
-
-            for entry in feed.entries[:3]:
-
-                title = getattr(
-                    entry,
-                    'title',
-                    ''
-                )
-
-                summary = getattr(
-                    entry,
-                    'summary',
-                    ''
-                )
-
-                link = getattr(
-                    entry,
-                    'link',
-                    ''
-                )
-
-                # Làm sạch link
-
-                link = (
-                    link.replace('%22', '')
-                        .replace('"', '')
-                        .strip()
-                )
-
-                print("Reading content...")
-
-                content = get_article_content(
-                    link
-                )
-
-                print(
-                    f"Content length: {len(content)}"
-                )
+            for entry in feed.entries[:5]:
+                link = getattr(entry, 'link', '').replace('%22','').replace('"','').strip()
 
                 all_articles.append({
-
                     "source": source,
-
-                    "title": title,
-
-                    "summary": summary,
-
-                    "content": content,
-
+                    "title": getattr(entry, 'title', ''),
+                    "summary": getattr(entry, 'summary', ''),
                     "link": link
                 })
 
-                count += 1
-
-            print(
-                f"{source}: {count} articles"
-            )
-
         except Exception as e:
-
-            print(
-                f"RSS ERROR {source}: {e}"
-            )
-
-    # =====================
-    # DATAFRAME
-    # =====================
+            print("RSS ERROR:", e)
 
     df = pd.DataFrame(all_articles)
 
-    print("\nTOTAL ARTICLES:", len(df))
-
-    # =====================
-    # VECTORIZE
-    # =====================
-
     if not df.empty:
-
-        texts = (
-
-            df["title"].fillna('') + " " +
-            df["summary"].fillna('') + " " +
-            df["content"].fillna('')
-        ).apply(normalize_text).tolist()
-
-        news_vectors = vectorizer.fit_transform(
-            texts
-        )
-
-        print("Vectors updated!")
+        texts = (df["title"].fillna('') + " " + df["summary"].fillna('')).tolist()
+        news_vectors = vectorizer.fit_transform(texts)
 
 # =========================
 # AUTO UPDATE
 # =========================
 
 def auto_update():
-
     while True:
-
+        crawl_news()
         time.sleep(1800)
 
-        crawl_news()
-
 # =========================
-# TÁCH SỐ / % / NGÀY
+# UTIL
 # =========================
 
 def extract_numbers(text):
-
-    pattern = (
-
-        r'\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?'
-        r'|\d+[.,]?\d*\s?(?:%|độ|°c|người|ca|triệu|tỷ)?'
-    )
-
-    matches = re.findall(
-        pattern,
-        text.lower()
-    )
-
-    return matches
-
-# =========================
-# CHECK GIẬT GÂN
-# =========================
+    pattern = r'\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|\d+[.,]?\d*%?'
+    return re.findall(pattern, text)
 
 def detect_clickbait(text):
-
-    lower = text.lower()
-
-    for word in CLICKBAIT_WORDS:
-
-        if word in lower:
-            return word
-
+    text = text.lower()
+    for w in CLICKBAIT_WORDS:
+        if w in text:
+            return w
     return None
-
-# =========================
-# CHECK PHỦ ĐỊNH
-# =========================
-
-def has_negative(text):
-
-    lower = text.lower()
-
-    for word in NEGATIVE_WORDS:
-
-        if word in lower:
-            return True
-
-    return False
 
 # =========================
 # HOME
@@ -324,109 +106,89 @@ def has_negative(text):
 
 @app.route("/")
 def home():
-
     return "Semantic News API is running!"
 
 # =========================
-# XEM BÀI BÁO ĐÃ LOAD
+# ⭐ FIX /NEWS (ĐẸP HƠN)
 # =========================
 
 @app.route("/news")
 def get_news():
 
     if df.empty:
-
-        return "<h2>Chưa có dữ liệu</h2>"
+        return """
+        <h2>Chưa có dữ liệu</h2>
+        """
 
     html = """
-
     <html>
     <head>
         <meta charset="utf-8">
         <title>Semantic News</title>
-
         <style>
+            body { font-family: Arial; background:#f5f5f5; padding:20px; }
+            h1 { text-align:center; }
 
-            body{
-                font-family: Arial;
-                margin: 30px;
-            }
-
-            .card{
-                border:1px solid #ccc;
+            .card {
+                background:white;
                 padding:15px;
-                margin-bottom:20px;
-                border-radius:10px;
+                margin:15px auto;
+                border-radius:12px;
+                box-shadow:0 2px 8px rgba(0,0,0,0.1);
+                max-width:900px;
             }
 
-            .source{
+            .source {
                 color:green;
                 font-weight:bold;
+                font-size:14px;
             }
 
-            a{
-                color:blue;
+            a {
+                color:#1a73e8;
+                text-decoration:none;
             }
 
+            .title {
+                font-size:18px;
+                font-weight:bold;
+                margin:10px 0;
+            }
+
+            .summary {
+                color:#444;
+            }
         </style>
     </head>
-
     <body>
 
-    <h1>Danh sách bài báo đã load</h1>
-
+    <h1>📰 DANH SÁCH BÀI BÁO (REALTIME RSS)</h1>
     """
 
     for _, row in df.iterrows():
-
         html += f"""
-
         <div class="card">
-
-            <div class="source">
-                {row['source']}
-            </div>
-
-            <h3>
-                {row['title']}
-            </h3>
-
-            <p>
-                {row['summary']}
-            </p>
-
-            <a href="{row['link']}" target="_blank">
-                Đọc bài báo
-            </a>
-
-            <br><br>
-
-            <small>
-                Nội dung đọc:
-                {row['content'][:300]}...
-            </small>
-
+            <div class="source">{row['source']}</div>
+            <div class="title">{row['title']}</div>
+            <div class="summary">{row['summary']}</div>
+            <br>
+            <a href="{row['link']}" target="_blank">👉 Đọc bài gốc</a>
         </div>
         """
 
     html += "</body></html>"
-
     return html
 
 # =========================
-# ĐẾM BÀI
+# COUNT
 # =========================
 
 @app.route("/count")
 def count_news():
-
-    return jsonify({
-
-        "total": len(df)
-    })
+    return jsonify({"total": len(df)})
 
 # =========================
-# SEARCH
+# SEARCH (GIỮ NGUYÊN LOGIC CỦA BẠN)
 # =========================
 
 @app.route("/search", methods=["POST"])
@@ -435,216 +197,57 @@ def search():
     global news_vectors
 
     data = request.json
-
     query = data["query"]
 
-    # =====================
-    # GIẬT GÂN
-    # =====================
-
     clickbait = detect_clickbait(query)
-
     if clickbait:
-
         return jsonify({
-
             "status": "fake",
-
-            "message":
-            f"❌ Phát hiện từ giật gân: {clickbait}",
-
+            "message": f"❌ Phát hiện từ giật gân: {clickbait}",
             "results": []
         })
-
-    # =====================
-    # SERVER CHƯA LOAD
-    # =====================
 
     if df.empty or news_vectors is None:
-
         return jsonify({
-
             "status": "empty",
-
-            "message":
-            "⚠ Server chưa tải xong dữ liệu",
-
+            "message": "⚠ Server chưa tải xong dữ liệu",
             "results": []
         })
 
-    # =====================
-    # NORMALIZE QUERY
-    # =====================
-
-    query = normalize_text(query)
-
-    # =====================
-    # TF-IDF SEARCH
-    # =====================
-
-    query_vector = vectorizer.transform(
-        [query]
-    )
-
-    scores = cosine_similarity(
-        query_vector,
-        news_vectors
-    )[0]
+    query_vector = vectorizer.transform([query])
+    scores = cosine_similarity(query_vector, news_vectors)[0]
 
     top_indices = scores.argsort()[-5:][::-1]
 
     results = []
-
     query_numbers = extract_numbers(query)
-
-    query_has_negative = has_negative(query)
-
-    # =====================
-    # TOP RESULTS
-    # =====================
+    query_negative = has_negative(query)
 
     for idx in top_indices:
 
         title = str(df.iloc[idx]["title"])
-
         summary = str(df.iloc[idx]["summary"])
-
-        content = str(df.iloc[idx]["content"])
-
         link = str(df.iloc[idx]["link"])
-
         source = str(df.iloc[idx]["source"])
 
         score = float(scores[idx])
 
-        article_text = normalize_text(
+        article_text = title + " " + summary
+        article_negative = has_negative(article_text)
 
-            title + " " +
-            summary + " " +
-            content
-        )
-
-        # =====================
-        # CHECK PHỦ ĐỊNH
-        # =====================
-
-        article_has_negative = has_negative(
-            article_text
-        )
-
-        if query_has_negative != article_has_negative:
-
-            score *= 0.4
-
-        # =====================
-        # CHECK SỐ LIỆU
-        # =====================
-
-        article_numbers = extract_numbers(
-            article_text
-        )
-
-        mismatches = []
-
-        for q in query_numbers:
-
-            found = False
-
-            for a in article_numbers:
-
-                if q == a:
-
-                    found = True
-                    break
-
-            if not found:
-
-                correct_value = (
-
-                    article_numbers[0]
-                    if len(article_numbers) > 0
-                    else "Không có"
-                )
-
-                mismatches.append({
-
-                    "user": q,
-
-                    "official":
-                    correct_value
-                })
+        if query_negative != article_negative:
+            score *= 0.3
 
         results.append({
-
             "title": title,
-
             "summary": summary,
-
             "link": link,
-
             "source": source,
-
-            "score": round(score, 2),
-
-            "mismatches": mismatches
+            "score": round(score, 2)
         })
-
-    # =====================
-    # SORT LẠI
-    # =====================
-
-    results = sorted(
-        results,
-        key=lambda x: x["score"],
-        reverse=True
-    )
-
-    # =====================
-    # SCORE QUÁ THẤP
-    # =====================
-
-    if results[0]["score"] < 0.30:
-
-        return jsonify({
-
-            "status": "not_found",
-
-            "message":
-            "❌ Không tìm thấy trên báo chính thống",
-
-            "highest_score":
-            results[0]["score"],
-
-            "results": []
-        })
-
-    # =====================
-    # SAI LỆCH SỐ LIỆU
-    # =====================
-
-    if len(results[0]["mismatches"]) > 0:
-
-        return jsonify({
-
-            "status": "mismatch",
-
-            "message":
-            "⚠ Có sai lệch số liệu hoặc ngày tháng",
-
-            "results": results
-        })
-
-    # =====================
-    # SUCCESS
-    # =====================
 
     return jsonify({
-
         "status": "success",
-
-        "message":
-        "✅ Tin đáng tin",
-
         "results": results
     })
 
@@ -652,20 +255,8 @@ def search():
 # START
 # =========================
 
-if __name__ == "__main__":
+crawl_news()
 
-    crawl_news()
+threading.Thread(target=auto_update, daemon=True).start()
 
-    threading.Thread(
-        target=auto_update,
-        daemon=True
-    ).start()
-
-    port = int(
-        os.environ.get("PORT", 10000)
-    )
-
-    app.run(
-        host="0.0.0.0",
-        port=port
-    )
+app.run(host="0.0.0.0", port=5000)

@@ -2,7 +2,6 @@ flask
 flask-cors
 pandas
 feedparser
+scikit-learn
 requests
 beautifulsoup4
-scikit-learn
-gunicorn
