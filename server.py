@@ -24,7 +24,6 @@ CORS(app)
 df = pd.DataFrame()
 
 vectorizer = TfidfVectorizer(
-    stop_words=None,
     lowercase=True
 )
 
@@ -75,9 +74,8 @@ CLICKBAIT_WORDS = [
 NEGATIVE_WORDS = [
 
     "không",
-    "chưa",
     "không có",
-    "không phải",
+    "chưa",
     "bác bỏ",
     "tin giả"
 ]
@@ -91,6 +89,7 @@ def get_article_content(url):
     try:
 
         headers = {
+
             "User-Agent":
             "Mozilla/5.0"
         }
@@ -284,6 +283,7 @@ def detect_clickbait(text):
     for word in CLICKBAIT_WORDS:
 
         if word in lower:
+
             return word
 
     return None
@@ -299,6 +299,7 @@ def has_negative(text):
     for word in NEGATIVE_WORDS:
 
         if word in lower:
+
             return True
 
     return False
@@ -313,15 +314,112 @@ def home():
     return "Semantic News API is running!"
 
 # =========================
-# DEBUG XEM BÀI
+# XEM TIN ĐẸP
 # =========================
 
 @app.route("/news")
 def get_news():
 
-    return jsonify(
-        df.to_dict(orient="records")
-    )
+    html = """
+
+    <html>
+
+    <head>
+
+        <meta charset="utf-8">
+
+        <style>
+
+            body{
+                font-family:Arial;
+                padding:20px;
+                background:#f5f5f5;
+            }
+
+            .card{
+                background:white;
+                padding:20px;
+                margin-bottom:20px;
+                border-radius:10px;
+                box-shadow:0 0 5px rgba(0,0,0,0.1);
+            }
+
+            .source{
+                color:blue;
+                font-weight:bold;
+                margin-bottom:10px;
+            }
+
+            .title{
+                font-size:22px;
+                font-weight:bold;
+                margin-bottom:10px;
+            }
+
+            .summary{
+                color:#444;
+                margin-bottom:10px;
+            }
+
+            .content{
+                color:#666;
+                font-size:15px;
+                line-height:1.5;
+            }
+
+            a{
+                color:green;
+                text-decoration:none;
+                font-weight:bold;
+            }
+
+        </style>
+
+    </head>
+
+    <body>
+
+        <h1>Tin đã load từ báo chính thống</h1>
+
+    """
+
+    for i, row in df.iterrows():
+
+        html += f"""
+
+        <div class="card">
+
+            <div class="source">
+                Nguồn: {row['source']}
+            </div>
+
+            <div class="title">
+                {row['title']}
+            </div>
+
+            <div class="summary">
+                {row['summary'][:300]}
+            </div>
+
+            <br>
+
+            <div class="content">
+                {row['content'][:800]}...
+            </div>
+
+            <br>
+
+            <a href="{row['link']}" target="_blank">
+                Mở bài báo
+            </a>
+
+        </div>
+
+        """
+
+    html += "</body></html>"
+
+    return html
 
 # =========================
 # ĐẾM BÀI
@@ -422,6 +520,7 @@ def search():
         score = float(scores[idx])
 
         article_text = (
+
             title + " " +
             summary + " " +
             content
@@ -435,7 +534,6 @@ def search():
             article_text
         )
 
-        # nếu phủ định không khớp
         if query_has_negative != article_has_negative:
 
             score *= 0.4
@@ -447,7 +545,7 @@ def search():
         mismatches = []
 
         # =====================
-        # CHECK SỐ / NGÀY
+        # CHECK SỐ LIỆU
         # =====================
 
         for q in query_numbers:
@@ -494,18 +592,20 @@ def search():
         })
 
     # =====================
-    # SẮP XẾP LẠI SAU KHI
-    # GIẢM SCORE PHỦ ĐỊNH
+    # SORT LẠI
     # =====================
 
     results = sorted(
+
         results,
+
         key=lambda x: x["score"],
+
         reverse=True
     )
 
     # =====================
-    # SCORE THẤP
+    # SCORE QUÁ THẤP
     # =====================
 
     if results[0]["score"] < 0.30:
@@ -524,7 +624,7 @@ def search():
         })
 
     # =====================
-    # SAI LỆCH SỐ LIỆU
+    # SAI LỆCH
     # =====================
 
     if len(results[0]["mismatches"]) > 0:
