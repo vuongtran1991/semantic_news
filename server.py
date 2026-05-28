@@ -6,6 +6,7 @@ import feedparser
 import re
 import threading
 import time
+from datetime import datetime, timedelta
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -34,58 +35,82 @@ rss_urls = {
 }
 
 # =========================
-# GIẬT GÂN
+# CLICKBAIT
 # =========================
 
-CLICKBAIT_WORDS = [
-    "sốc", "kinh hoàng", "gây bão", "không thể tin", "chấn động"
-]
+CLICKBAIT_WORDS = ["sốc", "kinh hoàng", "gây bão", "không thể tin", "chấn động"]
 
-# =========================
-# PHỦ ĐỊNH
-# =========================
+NEGATIVE_WORDS = ["không", "không có", "không phải", "chưa", "bác bỏ", "phủ nhận"]
 
-NEGATIVE_WORDS = [
-    "không", "không có", "không phải", "chưa", "bác bỏ", "phủ nhận"
-]
+
+def detect_clickbait(text):
+    text = text.lower()
+    return any(w in text for w in CLICKBAIT_WORDS)
+
 
 def has_negative(text):
     text = text.lower()
     return any(w in text for w in NEGATIVE_WORDS)
 
 # =========================
-# 🔥 FIX: BẮT SỐ - % - NGÀY - THỜI GIAN
+# 🔥 AI: NORMALIZE NUMBER
+# =========================
+
+def normalize_number(x):
+    return x.lower().replace(" ", "").replace(",", ".")
+
+# =========================
+# 🔥 AI: EXTRACT SMART NUMBERS
 # =========================
 
 def extract_numbers(text):
     text = text.lower()
 
-    pattern = r'''
-        \d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?   |   # ngày 12/05/2026
-        \d+\s?(ngày|tuần|tháng|năm|giờ)      |   # thời gian
-        \d+[.,]?\d*\s?%                      |   # phần trăm
-        \d+                                   # số thường
-    '''
+    patterns = [
+        r"\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?",   # date 12/05/2026
+        r"\d+[.,]?\d*\s?%",                      # percent
+        r"\d+\s?(ngày|tuần|tháng|năm|giờ)",      # time units
+        r"\d+"                                    # number
+    ]
 
-    results = re.findall(pattern, text, re.VERBOSE)
+    results = []
+    for p in patterns:
+        results += re.findall(p, text)
 
-    # 🔥 FIX: loại tuple rỗng do group
     clean = []
     for r in results:
         if isinstance(r, tuple):
-            r = next((x for x in r if x), "")
+            r = "".join([x for x in r if x])
         if r:
-            clean.append(r)
+            clean.append(r.strip())
 
     return clean
 
 # =========================
-# CLICKBAIT
+# 🔥 AI: PARSE DATE INTELLIGENT
 # =========================
 
-def detect_clickbait(text):
+def parse_date(text):
     text = text.lower()
-    return next((w for w in CLICKBAIT_WORDS if w in text), None)
+
+    # hôm qua
+    if "hôm qua" in text:
+        return (datetime.now() - timedelta(days=1)).date()
+
+    # hôm nay
+    if "hôm nay" in text:
+        return datetime.now().date()
+
+    # dd/mm/yyyy
+    m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{2,4})", text)
+    if m:
+        d, mth, y = m.groups()
+        y = int(y)
+        if y < 100:
+            y += 2000
+        return datetime(y, int(mth), int(d)).date()
+
+    return None
 
 # =========================
 # CRAWL
@@ -135,45 +160,31 @@ def home():
     return "Semantic News API running"
 
 # =========================
-# NEWS (đã format đẹp hơn)
+# NEWS
 # =========================
 
 @app.route("/news")
 def news():
-
     if df.empty:
         return "<h3>Chưa có dữ liệu</h3>"
 
-    html = """
-    <html>
-    <head>
-    <meta charset="utf-8">
-    <style>
-        body {font-family: Arial; margin:20px;}
-        .card {border:1px solid #ddd; padding:10px; margin:10px; border-radius:10px;}
-        .source {color:green; font-weight:bold;}
-        .title {font-size:18px; font-weight:bold;}
-    </style>
-    </head>
-    <body>
-    <h2>NEWS DASHBOARD</h2>
-    """
+    html = "<html><body><h2>NEWS</h2>"
 
     for _, r in df.iterrows():
         html += f"""
-        <div class="card">
-            <div class="source">{r['source']}</div>
-            <div class="title">{r['title']}</div>
+        <div>
+            <h3>{r['title']}</h3>
             <p>{r['summary']}</p>
-            <a href="{r['link']}" target="_blank">Read</a>
+            <a href="{r['link']}">Read</a>
         </div>
+        <hr>
         """
 
     html += "</body></html>"
     return html
 
 # =========================
-# SEARCH (FIX LOGIC MẠNH)
+# SEARCH AI UPGRADED
 # =========================
 
 @app.route("/search", methods=["POST"])
@@ -181,7 +192,7 @@ def search():
 
     global news_vectors
 
-    query = request.json["query"]
+    query = request.json.get("query", "")
 
     if detect_clickbait(query):
         return jsonify({"status": "fake", "results": []})
@@ -194,10 +205,11 @@ def search():
 
     top = scores.argsort()[-5:][::-1]
 
-    results = []
-
     query_nums = extract_numbers(query)
+    query_date = parse_date(query)
     query_neg = has_negative(query)
+
+    results = []
 
     for i in top:
 
@@ -207,28 +219,38 @@ def search():
         source = df.iloc[i]["source"]
 
         text = title + " " + summary
-
         score = float(scores[i])
 
         # =========================
-        # 🔥 FIX PHỦ ĐỊNH LOGIC
+        # NEGATIVE LOGIC FIX
         # =========================
         if query_neg != has_negative(text):
-            score *= 0.2
+            score *= 0.3
 
         article_nums = extract_numbers(text)
 
         mismatches = []
 
         # =========================
-        # 🔥 FIX SO SÁNH SỐ LIỆU
+        # NUMBER COMPARISON AI FIX
         # =========================
         for q in query_nums:
-            if not any(q == a for a in article_nums):
+            if not any(normalize_number(q) == normalize_number(a) for a in article_nums):
                 mismatches.append({
                     "query": q,
-                    "article": article_nums[0] if article_nums else "none"
+                    "article": article_nums[:3]
                 })
+
+        # =========================
+        # DATE COMPARISON AI FIX
+        # =========================
+        article_date = parse_date(text)
+        if query_date and article_date and query_date != article_date:
+            score *= 0.5
+            mismatches.append({
+                "date_query": str(query_date),
+                "date_article": str(article_date)
+            })
 
         results.append({
             "title": title,
@@ -263,7 +285,6 @@ def search():
 # =========================
 
 crawl_news()
-
 threading.Thread(target=auto_update, daemon=True).start()
 
 app.run(host="0.0.0.0", port=5000)
